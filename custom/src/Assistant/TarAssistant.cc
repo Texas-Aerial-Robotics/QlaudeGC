@@ -20,6 +20,7 @@
 #include "QGCLoggingCategory.h"
 #include "QmlObjectListModel.h"
 #include "TarMcpServer.h"
+#include "TarRosbag.h"
 #include "TarRouter.h"
 #include "Vehicle.h"
 
@@ -408,6 +409,10 @@ QString TarAssistant::_systemPrompt() const
                "and QML singletons. Explore with qgc_inspect (use filter) before acting. To upload a mission, write a "
                ".plan file in the working folder (edit mode) and call vehicle.sendPlan(path). Never say you cannot "
                "change something in QGC until you have looked for it with qgc_inspect.\n"
+               "- ROS bags on the companion computer (the drone's Jetson, reached over ssh): rosbag_status, "
+               "rosbag_start and rosbag_stop. Start/stop need the user's approval. Recording settings (topics excluded, "
+               "folder, ROS_DOMAIN_ID) are set in the Bag toolbar indicator; the default leaves out the raw camera and "
+               "Point-LIO's high-rate /path and /aft_mapped_to_init. Warn when free space on the companion is low.\n"
                "- Prefer the specific tools (parameters, app settings, comm links) when they fit. Every change shows the "
                "user an approval card. Commands that move or arm a vehicle are safety-critical: say exactly what will "
                "happen before calling, one action per call, and never chain flight commands without the user asking.\n"
@@ -502,6 +507,9 @@ QString TarAssistant::contextSnapshot() const
                 out << QStringLiteral("    ") + line;
             }
         }
+    }
+    if (_rosbag) {
+        out << _rosbag->statusText();
     }
     out << QStringLiteral("</qgc_context>");
     return out.join(QLatin1Char('\n'));
@@ -615,6 +623,12 @@ void TarAssistant::newChat()
 void TarAssistant::setQmlEngine(QQmlApplicationEngine *engine)
 {
     _mcp->setQmlEngine(engine);
+}
+
+void TarAssistant::setRosbag(TarRosbag *rosbag)
+{
+    _rosbag = rosbag;
+    _mcp->setRosbag(rosbag);
 }
 
 void TarAssistant::openSignIn() const

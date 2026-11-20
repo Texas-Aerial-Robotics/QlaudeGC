@@ -11,6 +11,8 @@
 #include <QtCore/QPointer>
 #include <QtCore/QVariant>
 
+#include "TarRosbag.h"
+
 class QTcpServer;
 class QTcpSocket;
 class Fact;
@@ -33,6 +35,8 @@ public:
 
     /// Gives the object tools access to the QGroundControl QML singleton and the main window.
     void setQmlEngine(QQmlApplicationEngine *engine) { _engine = engine; }
+    /// Enables the rosbag_* tools (ROS bag recording on the companion computer).
+    void setRosbag(TarRosbag *rosbag) { _rosbag = rosbag; }
 
     /// Answer a pending approval raised with approvalRequested().
     void resolveApproval(int approvalId, bool approved);
@@ -68,6 +72,8 @@ private:
         bool appSettings = false; ///< changes are QGC app settings, not vehicle parameters
         QStringList lines;        ///< card lines for generic actions (instead of changes)
         std::function<QString(bool &ok)> apply; ///< generic action run on approval
+        /// generic action that finishes later: call done(ok, text) exactly once
+        std::function<void(std::function<void(bool ok, const QString &text)> done)> applyAsync;
     };
 
     void _onNewConnection();
@@ -112,6 +118,10 @@ private:
     void _toolSetCommLink(QTcpSocket *socket, const QJsonValue &id, const QJsonObject &args);
     void _toolCommLinkAction(QTcpSocket *socket, const QJsonValue &id, const QJsonObject &args);
 
+    // ROS bag recording on the companion
+    void _toolRosbagStatus(QTcpSocket *socket, const QJsonValue &id);
+    void _toolRosbagStartStop(QTcpSocket *socket, const QJsonValue &id, const QJsonObject &args, bool start);
+
     void _requestApproval(const PendingApproval &pending, const QString &title, const QString &reason, QStringList warnings);
 
     QTcpServer *_server = nullptr;
@@ -120,6 +130,7 @@ private:
     QHash<int, PendingApproval> _pending;
     int _nextApprovalId = 1;
     QPointer<QQmlApplicationEngine> _engine;
+    QPointer<TarRosbag> _rosbag;
     QHash<int, QPointer<QObject>> _handles; ///< objects returned by qgc_call, addressed as $N
     int _nextHandle = 1;
 };

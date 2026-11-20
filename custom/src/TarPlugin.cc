@@ -10,6 +10,7 @@
 
 #include "QGCLoggingCategory.h"
 #include "TarAssistant.h"
+#include "TarRosbag.h"
 #include "TarRouter.h"
 
 QGC_LOGGING_CATEGORY(TarPluginLog, "Custom.TarPlugin")
@@ -19,8 +20,10 @@ Q_APPLICATION_STATIC(TarPlugin, _tarPluginInstance);
 TarPlugin::TarPlugin(QObject *parent)
     : QGCCorePlugin(parent)
     , _router(new TarRouter(this))
+    , _rosbag(new TarRosbag(this))
     , _assistant(new TarAssistant(_router, this))
 {
+    _assistant->setRosbag(_rosbag);
     qCDebug(TarPluginLog) << this;
 }
 
@@ -47,6 +50,7 @@ QQmlApplicationEngine *TarPlugin::createQmlApplicationEngine(QObject *parent)
     QQmlApplicationEngine *engine = QGCCorePlugin::createQmlApplicationEngine(parent);
     engine->rootContext()->setContextProperty(QStringLiteral("tarRouter"), _router);
     engine->rootContext()->setContextProperty(QStringLiteral("tarAssistant"), _assistant);
+    engine->rootContext()->setContextProperty(QStringLiteral("tarRosbag"), _rosbag);
     return engine;
 }
 
@@ -80,6 +84,7 @@ const QVariantList &TarPlugin::toolBarIndicators()
     static const QVariantList indicators = []() {
         QVariantList list = QGCCorePlugin::instance()->QGCCorePlugin::toolBarIndicators();
         list.prepend(QVariant::fromValue(QUrl::fromUserInput(QStringLiteral("qrc:/tar/qml/RouterIndicator.qml"))));
+        list.prepend(QVariant::fromValue(QUrl::fromUserInput(QStringLiteral("qrc:/tar/qml/RosbagIndicator.qml"))));
         list.prepend(QVariant::fromValue(QUrl::fromUserInput(QStringLiteral("qrc:/tar/qml/AssistantIndicator.qml"))));
         return list;
     }();

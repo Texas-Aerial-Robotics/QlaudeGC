@@ -5,12 +5,14 @@
 #include "QGCCorePlugin.h"
 
 class TarAssistant;
+class TarRosbag;
 class TarRouter;
 class QQmlApplicationEngine;
 
 Q_DECLARE_LOGGING_CATEGORY(TarPluginLog)
 
-/// TAR custom build core plugin: stock QGC plus a built-in MAVLink router and a Claude chat sidebar.
+/// TAR custom build core plugin: stock QGC plus a built-in MAVLink router, a Claude chat sidebar and
+/// ROS bag recording on the companion computer.
 class TarPlugin : public QGCCorePlugin
 {
     Q_OBJECT
@@ -30,5 +32,6 @@ public:
 
 private:
     TarRouter *_router = nullptr;
+    TarRosbag *_rosbag = nullptr;
     TarAssistant *_assistant = nullptr;
 };

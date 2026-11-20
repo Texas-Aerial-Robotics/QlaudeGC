@@ -3,6 +3,7 @@
 #   - stock QGC UI
 #   - built-in MAVLink router (mavlink-router compatible main.conf)
 #   - Claude chat sidebar (runs the local Claude Code CLI)
+#   - ROS bag recording on the companion computer (over ssh)
 #   - tar_router_cli: the same router as a standalone console program
 # ============================================================================
 
@@ -33,6 +34,8 @@ set(CUSTOM_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Assistant/TarMcpObjects.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Assistant/TarMcpServer.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Assistant/TarMcpServer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Rosbag/TarRosbag.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Rosbag/TarRosbag.h
     ${TAR_ROUTER_SOURCES}
     CACHE INTERNAL "" FORCE
 )
@@ -41,6 +44,7 @@ set(CUSTOM_INCLUDE_DIRECTORIES
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Router
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Assistant
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Rosbag
     CACHE INTERNAL "" FORCE
 )
 

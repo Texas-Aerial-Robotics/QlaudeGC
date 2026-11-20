@@ -10,6 +10,7 @@
 
 class TarMcpServer;
 class QQmlApplicationEngine;
+class TarRosbag;
 class TarRouter;
 
 Q_DECLARE_LOGGING_CATEGORY(TarAssistantLog)
@@ -105,6 +106,8 @@ public:
 
     /// Lets the MCP object tools reach QML singletons and the main window.
     void setQmlEngine(QQmlApplicationEngine *engine);
+    /// Adds the companion ROS bag recorder to the context snapshot and the MCP tools.
+    void setRosbag(TarRosbag *rosbag);
     /// Approve or reject the approval card at chat row `row`.
     Q_INVOKABLE void resolveApproval(int row, bool approved);
 
@@ -133,6 +136,7 @@ private:
     static QString _toolSummary(const QString &name, const QJsonObject &input);
 
     TarRouter *_router = nullptr;
+    TarRosbag *_rosbag = nullptr;
     TarChatModel *_messages = nullptr;
     QProcess *_process = nullptr;
     QByteArray _stdoutBuffer;

@@ -5,8 +5,13 @@
         <file alias="RouterConfigDialog.qml">res/qml/RouterConfigDialog.qml</file>
         <file alias="AssistantIndicator.qml">res/qml/AssistantIndicator.qml</file>
         <file alias="AssistantPanel.qml">res/qml/AssistantPanel.qml</file>
+        <file alias="RosbagIndicator.qml">res/qml/RosbagIndicator.qml</file>
+        <file alias="RosbagIndicatorPage.qml">res/qml/RosbagIndicatorPage.qml</file>
     </qresource>
     <qresource prefix="/tar/router">
         <file alias="main.conf">res/router/main.conf</file>
+    </qresource>
+    <qresource prefix="/tar/rosbag">
+        <file alias="rosbag_ctl.sh">res/rosbag/rosbag_ctl.sh</file>
     </qresource>
 </RCC>

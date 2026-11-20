@@ -69,6 +69,42 @@ Output: `build\RelWithDebInfo\QlaudeGC.exe` (see the build log for the exact pat
 The custom code only touches public QGC APIs (`QGCCorePlugin`, `LinkManager`, `UDPConfiguration`), so
 moving to a newer QGC tag is: fetch the tag, rebase the `tar-custom` branch, rebuild.
 
+## ROS bag recording
+
+The **Bag** toolbar indicator starts and stops `ros2 bag record` on the companion computer (the drone's Jetson).
+
+- **How it works.**
+  - QGC runs `ssh` (Windows OpenSSH, key auth, `BatchMode`, so it never prompts for a password) and pipes `res/rosbag/rosbag_ctl.sh` to `bash -s` with the settings prepended as shell variables. Nothing needs to be installed on the drone.
+  - The recorder runs detached (`setsid nohup`), so it keeps going if the link or QGC drops. Its state is kept on the drone in `~/.qgc_rosbag.pid` and `~/.qgc_rosbag.dir`, so a restarted QGC sees a recording that is already running.
+  - **Stop** sends SIGINT to the recorder and waits up to 30 s, so rosbag2 closes the bag and writes `metadata.yaml`.
+  - If the recorder dies on its own, the next status check reports it with the tail of `<bag>.log`.
+- **Indicator.**
+  - Red blinking dot and elapsed time while recording.
+  - Outlined dot and "Bag" when idle.
+  - Grey when the companion can't be reached.
+- **Drop-down page.** Click the indicator for Start/Stop, the bag path, its size and the free space on the companion.
+- **Polling.** QGC checks status every 5 s while recording and every 30 s while idle, and doesn't poll at all while the companion is unreachable. Opening the page refreshes.
+- **Settings** (expanded page, saved):
+
+  | Setting | Default |
+  |---|---|
+  | Companion | `tar@100.66.89.102` |
+  | ssh key | blank, which uses `~/.ssh/id_ed25519` and the other default keys |
+  | `ROS_DOMAIN_ID` | 1 |
+  | Bag folder | `~/bags` |
+  | Bag name prefix | `qgc`, giving `qgc_YYYYmmdd_HHMMSS` |
+  | Exclude regex | `^(/camera/image_raw\|/path\|/aft_mapped_to_init)$` |
+  | Extra setup.bash | `~/raytheon-2027-drone/install/setup.bash` (the drone's workspace: px4_msgs, dice_msgs, ...) |
+  | Extra `ros2 bag record` arguments | blank |
+
+  - The exclude regex leaves out the raw camera, which overruns the Orin Nano eMMC, and Point-LIO's ~16 kHz odometry.
+  - `/opt/ros/<distro>` is found automatically (jazzy, humble, ...). The exclude flag is picked per distro: `--exclude` on Humble, `--exclude-regex` on Jazzy.
+- **Claude.** The sidebar sees the recorder state in its context and has `rosbag_status`, `rosbag_start` and `rosbag_stop`. Start and stop show an approval card first.
+- **Code.**
+  - `src/Rosbag/TarRosbag.{h,cc}`: the backend.
+  - `res/rosbag/rosbag_ctl.sh`: runs on the companion.
+  - `res/qml/RosbagIndicator.qml` and `RosbagIndicatorPage.qml`: the toolbar indicator and its page.
+
 ## Claude chat sidebar
 
 Click the chat-bubble icon in the toolbar to open a Claude chat panel on the right side of the window. Drag its left edge to resize it.

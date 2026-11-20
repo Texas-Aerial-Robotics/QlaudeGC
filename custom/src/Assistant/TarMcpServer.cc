@@ -15,6 +15,7 @@
 #include "QGCLoggingCategory.h"
 #include "QmlObjectListModel.h"
 #include "SettingsManager.h"
+#include "TarRosbag.h"
 #include "Vehicle.h"
 
 QGC_LOGGING_CATEGORY(TarMcpServerLog, "Custom.TarMcpServer")
@@ -418,6 +419,26 @@ QJsonArray TarMcpServer::_toolDefinitions() const
             {QStringLiteral("annotations"), QJsonObject{{QStringLiteral("destructiveHint"), true}}},
         },
         QJsonObject{
+            {QStringLiteral("name"), QStringLiteral("rosbag_status")},
+            {QStringLiteral("description"), QStringLiteral("Check ROS bag recording on the companion computer (the drone's Jetson, over ssh): whether a bag is recording, its path, size and duration, the last bag, free disk space, and the recording settings (excluded topics, folder, ROS_DOMAIN_ID).")},
+            {QStringLiteral("inputSchema"), schema({})},
+            {QStringLiteral("annotations"), QJsonObject{{QStringLiteral("readOnlyHint"), true}}},
+        },
+        QJsonObject{
+            {QStringLiteral("name"), QStringLiteral("rosbag_start")},
+            {QStringLiteral("description"), QStringLiteral("Start ros2 bag record on the companion computer with the settings from the Bag toolbar indicator (all topics minus the exclude regex). Needs the user's approval; the call waits for the decision and for the recorder to start, and returns the bag path.")},
+            {QStringLiteral("inputSchema"), schema({
+                {QStringLiteral("reason"), prop(QStringLiteral("string"), QStringLiteral("One sentence shown to the user"))},
+            })},
+        },
+        QJsonObject{
+            {QStringLiteral("name"), QStringLiteral("rosbag_stop")},
+            {QStringLiteral("description"), QStringLiteral("Stop the running ROS bag recording on the companion computer (SIGINT, so the bag is closed cleanly with metadata.yaml). Needs the user's approval; returns the saved bag path and size.")},
+            {QStringLiteral("inputSchema"), schema({
+                {QStringLiteral("reason"), prop(QStringLiteral("string"), QStringLiteral("One sentence shown to the user"))},
+            })},
+        },
+        QJsonObject{
             {QStringLiteral("name"), QStringLiteral("qgc_inspect")},
             {QStringLiteral("description"), QStringLiteral("Browse QGC's live object tree: properties (with values), writable properties, callable methods, list items and facts of any object. Empty path lists the roots (vehicle, multiVehicleManager, linkManager, settingsManager, videoManager, joystickManager, adsbVehicleManager, positionManager, corePlugin, QGroundControl, window). Paths use dots and [index], e.g. \"vehicle\", \"vehicle.gps\", \"multiVehicleManager.vehicles[1]\", \"vehicle1.missionManager\", \"$3\". Use filter to narrow large objects.")},
             {QStringLiteral("inputSchema"), schema({
@@ -476,6 +497,12 @@ void TarMcpServer::_callTool(QTcpSocket *socket, const QJsonValue &id, const QSt
         _toolSetCommLink(socket, id, args);
     } else if (name == QLatin1String("comm_link_action")) {
         _toolCommLinkAction(socket, id, args);
+    } else if (name == QLatin1String("rosbag_status")) {
+        _toolRosbagStatus(socket, id);
+    } else if (name == QLatin1String("rosbag_start")) {
+        _toolRosbagStartStop(socket, id, args, true);
+    } else if (name == QLatin1String("rosbag_stop")) {
+        _toolRosbagStartStop(socket, id, args, false);
     } else if (name == QLatin1String("qgc_inspect")) {
         const QString text = _toolInspect(args, isError);
         _sendToolResult(socket, id, text, isError);
@@ -727,6 +754,65 @@ void TarMcpServer::_requestApproval(const PendingApproval &pending, const QStrin
 }
 
 // ---------------------------------------------------------------------------------------------------------
+// ROS bag recording on the companion computer
+// ---------------------------------------------------------------------------------------------------------
+
+void TarMcpServer::_toolRosbagStatus(QTcpSocket *socket, const QJsonValue &id)
+{
+    if (!_rosbag) {
+        _sendToolResult(socket, id, QStringLiteral("ROS bag recording is not available in this build."), true);
+        return;
+    }
+    QPointer<TarMcpServer> self(this);
+    const QPointer<QTcpSocket> guard(socket);
+    _rosbag->run(TarRosbag::Command::Status, [self, guard, id](bool ok, const QString &message) {
+        if (self) {
+            self->_sendToolResult(guard, id, message, !ok);
+        }
+    });
+}
+
+void TarMcpServer::_toolRosbagStartStop(QTcpSocket *socket, const QJsonValue &id, const QJsonObject &args, bool start)
+{
+    if (!_rosbag) {
+        _sendToolResult(socket, id, QStringLiteral("ROS bag recording is not available in this build."), true);
+        return;
+    }
+    if (_rosbag->known() && _rosbag->recording() == start) {
+        _sendToolResult(socket, id, (start ? QStringLiteral("Already recording. ") : QStringLiteral("Not recording. ")) + _rosbag->statusText());
+        return;
+    }
+
+    PendingApproval pending;
+    pending.socket = socket;
+    pending.rpcId = id;
+    if (start) {
+        pending.lines << QStringLiteral("ros2 bag record on %1").arg(_rosbag->host())
+                      << QStringLiteral("Folder %1, ROS_DOMAIN_ID %2").arg(_rosbag->bagFolder(), _rosbag->domainId())
+                      << QStringLiteral("Excluding: %1").arg(_rosbag->excludeRegex().isEmpty() ? QStringLiteral("nothing (all topics)") : _rosbag->excludeRegex());
+    } else {
+        pending.lines << QStringLiteral("ros2 bag record on %1").arg(_rosbag->host());
+        if (!_rosbag->bagPath().isEmpty()) {
+            pending.lines << _rosbag->bagPath();
+        }
+    }
+    const QPointer<TarRosbag> rosbag(_rosbag);
+    pending.applyAsync = [rosbag, start](std::function<void(bool, const QString &)> done) {
+        if (!rosbag) {
+            done(false, QStringLiteral("ROS bag recorder is gone."));
+            return;
+        }
+        rosbag->run(start ? TarRosbag::Command::Start : TarRosbag::Command::Stop, done);
+    };
+    QStringList warnings;
+    if (!_rosbag->known()) {
+        warnings << QStringLiteral("The companion has not answered yet; this may fail.");
+    }
+    _requestApproval(pending, start ? QStringLiteral("Start ROS bag recording") : QStringLiteral("Stop ROS bag recording"),
+                     args.value(QStringLiteral("reason")).toString().trimmed(), warnings);
+}
+
+// ---------------------------------------------------------------------------------------------------------
 // App settings
 // ---------------------------------------------------------------------------------------------------------
 
@@ -913,6 +999,20 @@ void TarMcpServer::rejectAllPending(const QString &reason)
 void TarMcpServer::_applyApproval(int approvalId)
 {
     const PendingApproval p = _pending.take(approvalId);
+    if (p.applyAsync) {
+        emit approvalFinished(approvalId, QStringLiteral("approved: running..."));
+        QPointer<TarMcpServer> self(this);
+        const QPointer<QTcpSocket> socket = p.socket;
+        const QJsonValue rpcId = p.rpcId;
+        p.applyAsync([self, socket, rpcId, approvalId](bool ok, const QString &text) {
+            if (!self) {
+                return;
+            }
+            self->_sendToolResult(socket, rpcId, text, !ok);
+            emit self->approvalFinished(approvalId, ok ? QStringLiteral("done") : QStringLiteral("failed: ") + text.left(120));
+        });
+        return;
+    }
     if (p.apply) {
         bool ok = false;
         const QString text = p.apply(ok);

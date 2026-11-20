@@ -1,8 +1,9 @@
 # QlaudeGC
 
-**QlaudeGC** is a custom build of [QGroundControl](https://github.com/mavlink/qgroundcontrol). It adds two things to QGC:
+**QlaudeGC** is a custom build of [QGroundControl](https://github.com/mavlink/qgroundcontrol). It adds three things to QGC:
 
 - a **built-in MAVLink router**, so other programs can share QGC's vehicle connection;
+- **ROS bag recording** on the drone's companion computer, started and stopped from the toolbar;
 - a **Claude chat sidebar** that can see the live vehicle state and, after you approve each change, adjust parameters, app settings and comm links.
 
 All of the custom code is in [`custom/`](custom/) and uses QGC's standard custom-build plugin mechanism (`QGCCorePlugin`). The rest of the tree is upstream QGC, unchanged, so updating to a newer QGC is a normal merge from `mavlink/qgroundcontrol`.
@@ -30,12 +31,22 @@ Detailed documentation: [`custom/README.md`](custom/README.md).
 - **Toolbar indicator.** It shows traffic, the number of active endpoints and config errors at a glance. Click it for per-endpoint rx/tx rates, the system ids heard on each endpoint, CRC errors, the enable switch and the log.
 - **`tar_router_cli`.** The same router engine as a standalone console program. `--check file.conf` validates a config.
 
+### ROS bag recording
+
+- **One click from the toolbar.** The **Bag** indicator starts and stops `ros2 bag record` on the companion computer (e.g. the Jetson) over ssh with your existing key. Nothing needs to be installed on the drone.
+- **Safe stop.** Stop sends SIGINT and waits, so the bag is closed cleanly with `metadata.yaml`.
+- **Survives drops.** The recorder runs detached, so losing the link or closing QGC doesn't end it. A restarted QGC picks up a recording that is already running.
+- **Live status.** A red blinking dot and the elapsed time while recording; the drop-down shows the bag path, size and free space on the companion. A recorder that dies on its own is reported with its last log lines.
+- **Sensible defaults, all editable.** Records all topics except the raw camera and Point-LIO's high-rate odometry, on `ROS_DOMAIN_ID` 1, into `~/bags`. Works on Humble and Jazzy.
+- **Claude can use it too.** The sidebar has `rosbag_status`, `rosbag_start` and `rosbag_stop`; start and stop need your approval.
+
 ### Claude chat sidebar
 
 - **Chat panel inside QGC.** Click the chat-bubble icon in the toolbar to open it. It runs the locally installed [Claude Code](https://claude.com/claude-code) CLI. Conversations persist and can be resumed.
 - **Live context.** Each message carries a snapshot of QGC's state, which can be previewed or turned off:
   - every vehicle's mode, armed and flying state, prearm errors, GPS, batteries, altitude, position and recent messages;
-  - router status and the log tail.
+  - router status and the log tail;
+  - ROS bag recorder status.
 - **Built-in MCP server (`qgc`).** It listens on localhost and needs a per-launch token. It gives Claude tools to:
   - list vehicles, and search and read parameters with full metadata (units, ranges, defaults, enums, bitmasks, reboot-required);
   - **set parameters**, after checking type and range;

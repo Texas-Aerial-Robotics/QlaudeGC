@@ -38,6 +38,12 @@ class TarRosbagRecorder : public QObject
     Q_PROPERTY(QString excludeRegex READ excludeRegex   WRITE setExcludeRegex   NOTIFY settingsChanged)
     Q_PROPERTY(QString setupScript  READ setupScript    WRITE setSetupScript    NOTIFY settingsChanged)
     Q_PROPERTY(QString extraArgs    READ extraArgs      WRITE setExtraArgs      NOTIFY settingsChanged)
+    Q_PROPERTY(QString downloadFolder READ downloadFolder WRITE setDownloadFolder NOTIFY settingsChanged)
+
+    // Download of the last bag to this computer (scp)
+    Q_PROPERTY(bool     downloading     READ downloading    NOTIFY downloadChanged)
+    Q_PROPERTY(QString  downloadText    READ downloadText   NOTIFY downloadChanged)
+    Q_PROPERTY(QString  downloadedPath  READ downloadedPath NOTIFY downloadChanged)
 
     // State (from the last command)
     Q_PROPERTY(bool     recording   READ recording      NOTIFY stateChanged)
@@ -63,6 +69,10 @@ public:
     Q_INVOKABLE void stop() { run(Command::Stop); }
     Q_INVOKABLE void refresh() { run(Command::Status); }
     Q_INVOKABLE void restoreDefaults();
+    /// Copies the last finished bag folder and its .log into downloadFolder (scp, same key and address).
+    Q_INVOKABLE void downloadLastBag();
+    Q_INVOKABLE void cancelDownload();
+    Q_INVOKABLE void openDownloadFolder() const;
 
     /// Queues a command; done (optional) runs when it finishes.
     void run(Command command, Callback done = {});
@@ -87,6 +97,12 @@ public:
     void setSetupScript(const QString &value);
     QString extraArgs() const { return _extraArgs; }
     void setExtraArgs(const QString &value);
+    QString downloadFolder() const { return _downloadFolder; }
+    void setDownloadFolder(const QString &value);
+
+    bool downloading() const { return _download != nullptr; }
+    QString downloadText() const { return _downloadText; }
+    QString downloadedPath() const { return _downloadedPath; }
 
     bool recording() const { return _recording; }
     bool busy() const { return _process != nullptr; }
@@ -105,6 +121,7 @@ signals:
     void stateChanged();
     void busyChanged();
     void logChanged();
+    void downloadChanged();
 
 private:
     struct Job {
@@ -132,7 +149,12 @@ private:
     QString _settingsKey(const char *key) const;
 
     static Defaults _defaults(const QString &vehicleId);
+    void _downloadFinished(int exitCode, bool crashed);
+    void _downloadProgress();
+
+    static QString _defaultDownloadFolder();
     static QString _sshProgram();
+    static QString _scpProgram();
     static QString _quote(const QString &value);
     static QString _commandName(Command command);
 
@@ -152,6 +174,15 @@ private:
     QString _excludeRegex;
     QString _setupScript;
     QString _extraArgs;
+    QString _downloadFolder;
+
+    QProcess *_download = nullptr;
+    QTimer _downloadTimer;
+    QString _downloadText;
+    QString _downloadedPath;
+    QString _downloadTarget;   ///< local folder being written
+    double _downloadTotal = 0;
+    bool _downloadCancelled = false;
 
     bool _recording = false;
     bool _reachable = false;

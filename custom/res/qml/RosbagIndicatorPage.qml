@@ -111,6 +111,28 @@ ToolIndicatorPage {
                         label:      qsTr("Free on companion")
                         labelText:  _formatBytes(_r.freeBytes)
                     }
+
+                    RowLayout {
+                        QGCButton {
+                            text:       _r.downloading ? qsTr("Cancel Download") : qsTr("Download Last Bag")
+                            enabled:    _r.downloading || (!_r.recording && !_r.busy && _r.known && _r.bagPath !== "")
+                            onClicked:  _r.downloading ? _r.cancelDownload() : _r.downloadLastBag()
+                        }
+
+                        QGCButton {
+                            text:       qsTr("Open Folder")
+                            onClicked:  _r.openDownloadFolder()
+                        }
+                    }
+
+                    QGCLabel {
+                        Layout.fillWidth:       true
+                        Layout.preferredWidth:  _fieldWidth
+                        visible:                _r.downloadText !== ""
+                        text:                   _r.downloadText
+                        wrapMode:               Text.WrapAnywhere
+                        font.pointSize:         ScreenTools.smallFontPointSize
+                    }
                 }
             }
 
@@ -209,6 +231,15 @@ ToolIndicatorPage {
                             text:                   _r.extraArgs
                             placeholderText:        "--max-bag-size 2000000000"
                             onEditingFinished:      _r.extraArgs = text
+                        }
+                    }
+
+                    RowLayout {
+                        QGCLabel { text: qsTr("Download folder (this PC)"); Layout.fillWidth: true }
+                        QGCTextField {
+                            Layout.preferredWidth:  _fieldWidth
+                            text:                   _r.downloadFolder
+                            onEditingFinished:      _r.downloadFolder = text
                         }
                     }
 

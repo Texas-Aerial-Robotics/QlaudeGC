@@ -1,7 +1,11 @@
 #include "TarRosbagRecorder.h"
 
 #include <QtCore/QDateTime>
+#include <QtCore/QDir>
+#include <QtCore/QDirIterator>
 #include <QtCore/QFile>
+#include <QtCore/QUrl>
+#include <QtGui/QDesktopServices>
 #include <QtCore/QFileInfo>
 #include <QtCore/QProcess>
 #include <QtCore/QSettings>
@@ -71,7 +75,11 @@ TarRosbagRecorder::TarRosbagRecorder(const TarFieldVehicle &vehicle, TarFieldNet
     _excludeRegex = settings.value(_settingsKey("excludeRegex"), d.excludeRegex).toString();
     _setupScript = settings.value(_settingsKey("setupScript"), d.setupScript).toString();
     _extraArgs = settings.value(_settingsKey("extraArgs")).toString();
+    _downloadFolder = settings.value(_settingsKey("downloadFolder"), _defaultDownloadFolder()).toString();
     _lastHost = host();
+
+    _downloadTimer.setInterval(1000);
+    (void) connect(&_downloadTimer, &QTimer::timeout, this, &TarRosbagRecorder::_downloadProgress);
 
     _timeout.setSingleShot(true);
     _timeout.setInterval(kTimeoutMs);
@@ -114,6 +122,142 @@ void TarRosbagRecorder::setBagPrefix(const QString &value) { _setSetting(_bagPre
 void TarRosbagRecorder::setExcludeRegex(const QString &value) { _setSetting(_excludeRegex, "excludeRegex", value); }
 void TarRosbagRecorder::setSetupScript(const QString &value) { _setSetting(_setupScript, "setupScript", value); }
 void TarRosbagRecorder::setExtraArgs(const QString &value) { _setSetting(_extraArgs, "extraArgs", value); }
+void TarRosbagRecorder::setDownloadFolder(const QString &value) { _setSetting(_downloadFolder, "downloadFolder", value); }
+
+QString TarRosbagRecorder::_defaultDownloadFolder()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/TAR bags");
+}
+
+void TarRosbagRecorder::downloadLastBag()
+{
+    if (_download) {
+        return;
+    }
+    if (_recording || _bagPath.isEmpty() || !_known) {
+        _downloadText = tr("No finished bag to download.");
+        emit downloadChanged();
+        return;
+    }
+    const QString name = QFileInfo(_bagPath).fileName();
+    QDir dir(_downloadFolder.isEmpty() ? _defaultDownloadFolder() : _downloadFolder);
+    if (!dir.mkpath(QStringLiteral("."))) {
+        _downloadText = tr("Cannot create %1").arg(dir.absolutePath());
+        emit downloadChanged();
+        return;
+    }
+    _downloadTarget = dir.filePath(name);
+    if (QFileInfo::exists(_downloadTarget)) {
+        _downloadedPath = _downloadTarget;
+        _downloadText = tr("Already downloaded: %1").arg(QDir::toNativeSeparators(_downloadTarget));
+        emit downloadChanged();
+        return;
+    }
+    _downloadTotal = _bagBytes;
+    _downloadCancelled = false;
+    _downloadedPath.clear();
+
+    // Run inside the destination and copy to "." so a Windows drive letter is never mistaken for a host.
+    const QString remote = host() + QLatin1Char(':');
+    QStringList args{
+        QStringLiteral("-o"), QStringLiteral("BatchMode=yes"),
+        QStringLiteral("-o"), QStringLiteral("ConnectTimeout=8"),
+        QStringLiteral("-o"), QStringLiteral("StrictHostKeyChecking=accept-new"),
+        QStringLiteral("-r"),
+    };
+    if (!_sshKey.isEmpty()) {
+        args << QStringLiteral("-i") << _sshKey;
+    }
+    args << remote + _bagPath << remote + _bagPath + QStringLiteral(".log") << QStringLiteral(".");
+
+    _download = new QProcess(this);
+    _download->setProgram(_scpProgram());
+    _download->setArguments(args);
+    _download->setWorkingDirectory(dir.absolutePath());
+    (void) connect(_download, &QProcess::finished, this, [this](int exitCode, QProcess::ExitStatus status) {
+        _downloadFinished(exitCode, status == QProcess::CrashExit);
+    });
+    (void) connect(_download, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) {
+            _downloadFinished(-1, true);
+        }
+    });
+    _download->start();
+    _downloadText = tr("Downloading %1 (%2)...").arg(name, formatBytes(_downloadTotal));
+    _appendLog(tr("Downloading %1 to %2").arg(_bagPath, QDir::toNativeSeparators(dir.absolutePath())));
+    _downloadTimer.start();
+    emit downloadChanged();
+}
+
+void TarRosbagRecorder::_downloadProgress()
+{
+    if (!_download) {
+        return;
+    }
+    double bytes = 0;
+    QDirIterator it(_downloadTarget, QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        bytes += static_cast<double>(it.nextFileInfo().size());
+    }
+    _downloadText = (_downloadTotal > 0)
+        ? tr("Downloading %1: %2 of %3 (%4%)").arg(QFileInfo(_downloadTarget).fileName(), formatBytes(bytes), formatBytes(_downloadTotal))
+              .arg(qMin(100.0, 100.0 * bytes / _downloadTotal), 0, 'f', 0)
+        : tr("Downloading %1: %2").arg(QFileInfo(_downloadTarget).fileName(), formatBytes(bytes));
+    emit downloadChanged();
+}
+
+void TarRosbagRecorder::_downloadFinished(int exitCode, bool crashed)
+{
+    if (!_download) {
+        return;
+    }
+    _downloadTimer.stop();
+    QProcess *process = _download;
+    _download = nullptr;
+    const QString err = QString::fromUtf8(process->readAllStandardError()).trimmed();
+    const bool failedToStart = process->error() == QProcess::FailedToStart;
+    process->deleteLater();
+
+    // The bag folder is what matters; a missing .log alone still counts as a successful download.
+    const bool gotBag = QFileInfo::exists(_downloadTarget + QStringLiteral("/metadata.yaml"));
+    if (_downloadCancelled) {
+        (void) QDir(_downloadTarget).removeRecursively();
+        (void) QFile::remove(_downloadTarget + QStringLiteral(".log"));
+        _downloadText = tr("Download cancelled.");
+    } else if (gotBag) {
+        _downloadedPath = _downloadTarget;
+        double bytes = 0;
+        QDirIterator it(_downloadTarget, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            bytes += static_cast<double>(it.nextFileInfo().size());
+        }
+        _downloadText = tr("Saved to %1 (%2)").arg(QDir::toNativeSeparators(_downloadTarget), formatBytes(bytes));
+    } else {
+        QString detail = failedToStart ? tr("could not run %1").arg(_scpProgram()) : err.split(QLatin1Char('\n')).constLast();
+        if (detail.isEmpty()) {
+            detail = crashed ? tr("interrupted") : tr("exit code %1").arg(exitCode);
+        }
+        (void) QDir(_downloadTarget).removeRecursively();
+        _downloadText = tr("Download failed: %1").arg(detail);
+    }
+    _appendLog(_downloadText);
+    emit downloadChanged();
+}
+
+void TarRosbagRecorder::cancelDownload()
+{
+    if (_download) {
+        _downloadCancelled = true;
+        _download->kill();
+    }
+}
+
+void TarRosbagRecorder::openDownloadFolder() const
+{
+    const QString path = _downloadedPath.isEmpty() ? (_downloadFolder.isEmpty() ? _defaultDownloadFolder() : _downloadFolder) : _downloadedPath;
+    (void) QDir().mkpath(path);
+    (void) QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+}
 
 void TarRosbagRecorder::restoreDefaults()
 {
@@ -125,6 +269,7 @@ void TarRosbagRecorder::restoreDefaults()
     setExcludeRegex(d.excludeRegex);
     setSetupScript(d.setupScript);
     setExtraArgs(QString());
+    setDownloadFolder(_defaultDownloadFolder());
 }
 
 void TarRosbagRecorder::_networkChanged()
@@ -406,6 +551,18 @@ QString TarRosbagRecorder::_sshProgram()
 #endif
     const QString found = QStandardPaths::findExecutable(QStringLiteral("ssh"));
     return found.isEmpty() ? QStringLiteral("ssh") : found;
+}
+
+QString TarRosbagRecorder::_scpProgram()
+{
+#ifdef Q_OS_WIN
+    const QString system = QStringLiteral("C:/Windows/System32/OpenSSH/scp.exe");
+    if (QFileInfo::exists(system)) {
+        return system;
+    }
+#endif
+    const QString found = QStandardPaths::findExecutable(QStringLiteral("scp"));
+    return found.isEmpty() ? QStringLiteral("scp") : found;
 }
 
 QString TarRosbagRecorder::_quote(const QString &value)

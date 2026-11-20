@@ -101,6 +101,10 @@ vehicle can start or stop while the other records, and **Start Both / Stop Both*
   grey when its companion can't be reached (e.g. `UAV ● 03:12  UGV ○`).
 - **Drop-down page.** The network in use, then per vehicle: Start/Stop, Refresh, the bag path, its size and the
   free space on the companion; and Start Both / Stop Both.
+- **Download Last Bag.** Per vehicle, copies the last finished bag folder and its `.log` to this PC with `scp`
+  (same key and address), into the vehicle's *Download folder* (default `Documents\TAR bags`). Shows progress,
+  can be cancelled (the partial copy is removed), skips a bag that is already there, and **Open Folder** shows it.
+  Disabled while that vehicle is recording.
 - **Polling.** Per vehicle, every 5 s while recording and every 30 s while idle; no polling while unreachable.
   Opening the page refreshes both.
 - **Settings** (expanded page, saved per vehicle under `TarRosbag/<uav|ugv>`; the address is not a setting):

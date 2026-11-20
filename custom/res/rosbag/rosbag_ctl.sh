@@ -3,7 +3,8 @@
 #   QGC_CMD      start | stop | status
 #   QGC_DOMAIN   ROS_DOMAIN_ID ("" = leave unset)
 #   QGC_DIR      folder for bags (a leading ~/ means $HOME)
-#   QGC_PREFIX   bag name prefix
+#   QGC_PREFIX   bag name prefix (bag = <prefix>_<date>_<time>)
+#   QGC_NAME     explicit bag name instead ("" = use the prefix); already sanitized by QGC
 #   QGC_EXCLUDE  regex of topics to leave out ("" = record everything)
 #   QGC_SETUP    extra setup scripts to source after /opt/ros, space-separated (e.g. the workspace with
 #                px4_msgs; the rover needs its ros_env.sh and tar_ws), may be ""
@@ -91,7 +92,13 @@ do_start() {
     fi
 
     local out args
-    out="$QGC_DIR/${QGC_PREFIX}_$(date +%Y%m%d_%H%M%S)"
+    if [ -n "$QGC_NAME" ]; then
+        out="$QGC_DIR/$QGC_NAME"
+        # Never overwrite an existing bag: add the time stamp instead.
+        { [ -e "$out" ] || [ -e "$out.log" ]; } && out="${out}_$(date +%Y%m%d_%H%M%S)"
+    else
+        out="$QGC_DIR/${QGC_PREFIX}_$(date +%Y%m%d_%H%M%S)"
+    fi
     args=(bag record -a -o "$out")
     if [ -n "$QGC_EXCLUDE" ]; then
         # Humble: -x/--exclude <regex>; Jazzy and later: --exclude-regex <regex>.

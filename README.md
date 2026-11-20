@@ -44,7 +44,7 @@ Detailed documentation: [`custom/README.md`](custom/README.md).
 - **Safe stop.** Stop sends SIGINT and waits, so the bag is closed cleanly with `metadata.yaml`.
 - **Survives drops.** The recorder runs detached, so losing the link or closing QGC doesn't end it. A restarted QGC picks up a recording that is already running.
 - **Live status.** Per vehicle, a red blinking dot and the elapsed time while recording; the drop-down shows each bag's path, size and the free space on that companion. A recorder that dies on its own is reported with its last log lines.
-- **Sensible defaults, all editable per vehicle.** UAV: domain 1, everything except the raw camera and Point-LIO's high-rate outputs. UGV: domain 2, everything except FAST-LIO's dense clouds and map. Both into `~/bags`. Works on Humble and Jazzy.
+- **Sensible defaults, all editable per vehicle.** UAV: domain 1, everything except the raw camera and Point-LIO's high-rate outputs. UGV: domain 2, everything except FAST-LIO's dense clouds and map. Both into `~/QGC_bags`. Works on Humble and Jazzy.
 - **Claude can use it too.** The sidebar has `rosbag_status`, `rosbag_start` and `rosbag_stop` with `vehicle` = `uav`, `ugv` or `both`; start and stop need your approval.
 
 ### Claude chat sidebar

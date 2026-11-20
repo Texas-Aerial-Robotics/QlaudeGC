@@ -433,6 +433,7 @@ QJsonArray TarMcpServer::_toolDefinitions() const
             {QStringLiteral("description"), QStringLiteral("Start ros2 bag record on the UAV, the UGV or both, with each vehicle's settings from the Bag toolbar indicator (all topics minus its exclude regex). A vehicle that is already recording is left alone. Needs the user's approval; the call waits for the decision and for the recorders to start, and returns the bag paths.")},
             {QStringLiteral("inputSchema"), schema({
                 {QStringLiteral("vehicle"), prop(QStringLiteral("string"), QStringLiteral("uav, ugv or both"))},
+                {QStringLiteral("name"), prop(QStringLiteral("string"), QStringLiteral("Optional bag folder name for this recording (letters, digits, . _ -); default <prefix>_<date>_<time>. An existing name gets the time appended."))},
                 {QStringLiteral("reason"), prop(QStringLiteral("string"), QStringLiteral("One sentence shown to the user"))},
             }, {QStringLiteral("vehicle")})},
         },
@@ -850,7 +851,11 @@ void TarMcpServer::_toolRosbagStartStop(QTcpSocket *socket, const QJsonValue &id
     for (const QString &u : unchanged) {
         pending.lines << QStringLiteral("(%1, left alone)").arg(u);
     }
-    pending.applyAsync = [todo, start](std::function<void(bool, const QString &)> done) {
+    const QString bagName = start ? TarRosbagRecorder::sanitizeBagName(args.value(QStringLiteral("name")).toString()) : QString();
+    if (!bagName.isEmpty()) {
+        pending.lines << QStringLiteral("Bag name: %1").arg(bagName);
+    }
+    pending.applyAsync = [todo, start, bagName](std::function<void(bool, const QString &)> done) {
         auto results = std::make_shared<QStringList>();
         auto remaining = std::make_shared<int>(static_cast<int>(todo.size()));
         auto allOk = std::make_shared<bool>(true);
@@ -865,6 +870,9 @@ void TarMcpServer::_toolRosbagStartStop(QTcpSocket *socket, const QJsonValue &id
             if (!r) {
                 finish(false, QStringLiteral("Recorder is gone."));
                 continue;
+            }
+            if (!bagName.isEmpty()) {
+                r->setBagName(bagName);
             }
             r->run(start ? TarRosbagRecorder::Command::Start : TarRosbagRecorder::Command::Stop, finish);
         }

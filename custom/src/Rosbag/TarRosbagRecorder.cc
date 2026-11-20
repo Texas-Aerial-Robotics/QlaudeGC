@@ -50,13 +50,13 @@ TarRosbagRecorder::Defaults TarRosbagRecorder::_defaults(const QString &vehicleI
     if (vehicleId == QLatin1String("ugv")) {
         // Rover: its own stack on domain 2 (ros_env.sh also sets the Fast DDS peer profile); tar_ws has its
         // message packages. FAST-LIO's registered clouds and map are large; /path grows without bound.
-        return {QStringLiteral("2"), QStringLiteral("~/bags"), QStringLiteral("ugv"),
+        return {QStringLiteral("2"), QStringLiteral("~/QGC_bags"), QStringLiteral("ugv"),
                 QStringLiteral("^(/Laser_map|/cloud_registered|/cloud_registered_body|/cloud_effected|/path)$"),
                 QStringLiteral("~/LIDARSLAM/autostart/ros_env.sh ~/tar_ws/install/setup.bash")};
     }
     // Drone: domain 1, workspace raytheon-2027-drone (px4_msgs, dice_msgs). The raw camera overruns the eMMC;
     // Point-LIO's /path and high-rate /aft_mapped_to_init are left out.
-    return {QStringLiteral("1"), QStringLiteral("~/bags"), QStringLiteral("uav"),
+    return {QStringLiteral("1"), QStringLiteral("~/QGC_bags"), QStringLiteral("uav"),
             QStringLiteral("^(/camera/image_raw|/path|/aft_mapped_to_init)$"),
             QStringLiteral("~/raytheon-2027-drone/install/setup.bash")};
 }
@@ -123,6 +123,29 @@ void TarRosbagRecorder::setExcludeRegex(const QString &value) { _setSetting(_exc
 void TarRosbagRecorder::setSetupScript(const QString &value) { _setSetting(_setupScript, "setupScript", value); }
 void TarRosbagRecorder::setExtraArgs(const QString &value) { _setSetting(_extraArgs, "extraArgs", value); }
 void TarRosbagRecorder::setDownloadFolder(const QString &value) { _setSetting(_downloadFolder, "downloadFolder", value); }
+
+void TarRosbagRecorder::setBagName(const QString &value)
+{
+    // Not persisted: it names the next bag only.
+    if (value == _bagName) {
+        return;
+    }
+    _bagName = value;
+    emit bagNameChanged();
+}
+
+QString TarRosbagRecorder::sanitizeBagName(const QString &value)
+{
+    QString out;
+    for (const QChar c : value.trimmed()) {
+        out += (c.isLetterOrNumber() && c.unicode() < 128) || c == QLatin1Char('.') || c == QLatin1Char('_') || c == QLatin1Char('-')
+                   ? c : QLatin1Char('_');
+    }
+    while (out.startsWith(QLatin1Char('.'))) {
+        out.remove(0, 1);   // no hidden folders, no "." / ".."
+    }
+    return out.left(120);
+}
 
 QString TarRosbagRecorder::_defaultDownloadFolder()
 {
@@ -329,6 +352,7 @@ void TarRosbagRecorder::_startNext()
     }
     _current = _queue.takeFirst();
     _currentHost = host();
+    _startingName = (_current.command == Command::Start) ? sanitizeBagName(_bagName) : QString();
     if (_current.command != Command::Status) {
         _appendLog(tr("%1 on %2...").arg(_commandName(_current.command), _currentHost));
     }
@@ -400,6 +424,10 @@ void TarRosbagRecorder::_finished(int exitCode, bool crashed)
         case Command::Start:
             ok = values.value(QStringLiteral("STARTED")).toString() == QLatin1String("1");
             message = ok ? tr("Recording to %1").arg(_bagPath) : error;
+            // The custom name was for this recording only; the next one gets the automatic name again.
+            if (ok && !_startingName.isEmpty() && sanitizeBagName(_bagName) == _startingName) {
+                setBagName(QString());
+            }
             break;
         case Command::Stop: {
             ok = values.value(QStringLiteral("STOPPED")).toString() == QLatin1String("1");
@@ -518,6 +546,7 @@ QString TarRosbagRecorder::_script(Command command) const
     header += QStringLiteral("QGC_DOMAIN=%1\n").arg(_quote(_domainId));
     header += QStringLiteral("QGC_DIR=%1\n").arg(_quote(_bagFolder.isEmpty() ? d.bagFolder : _bagFolder));
     header += QStringLiteral("QGC_PREFIX=%1\n").arg(_quote(_bagPrefix.isEmpty() ? d.bagPrefix : _bagPrefix));
+    header += QStringLiteral("QGC_NAME=%1\n").arg(_quote(command == Command::Start ? _startingName : QString()));
     header += QStringLiteral("QGC_EXCLUDE=%1\n").arg(_quote(_excludeRegex));
     header += QStringLiteral("QGC_SETUP=%1\n").arg(_quote(_setupScript));
     header += QStringLiteral("QGC_EXTRA=%1\n").arg(_quote(_extraArgs));

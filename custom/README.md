@@ -101,6 +101,9 @@ vehicle can start or stop while the other records, and **Start Both / Stop Both*
   grey when its companion can't be reached (e.g. `UAV ● 03:12  UGV ○`).
 - **Drop-down page.** The network in use, then per vehicle: Start/Stop, Refresh, the bag path, its size and the
   free space on the companion; and Start Both / Stop Both.
+- **Bag name.** Per vehicle, an optional name for the next recording (`~/QGC_bags/<name>`); empty uses
+  `<prefix>_<date>_<time>`. Unsafe characters become `_`, an existing name gets the time appended, and the field
+  clears once the recording starts. Claude's `rosbag_start` takes the same optional `name`.
 - **Download Last Bag.** Per vehicle, copies the last finished bag folder and its `.log` to this PC with `scp`
   (same key and address), into the vehicle's *Download folder* (default `Documents\TAR bags`). Shows progress,
   can be cancelled (the partial copy is removed), skips a bag that is already there, and **Open Folder** shows it.
@@ -113,7 +116,7 @@ vehicle can start or stop while the other records, and **Start Both / Stop Both*
   |---|---|---|
   | ssh key | blank (default keys) | blank (default keys) |
   | `ROS_DOMAIN_ID` | 1 | 2 |
-  | Bag folder | `~/bags` | `~/bags` |
+  | Bag folder | `~/QGC_bags` | `~/QGC_bags` |
   | Bag name prefix | `uav` | `ugv` |
   | Exclude regex | `^(/camera/image_raw\|/path\|/aft_mapped_to_init)$` | `^(/Laser_map\|/cloud_registered\|/cloud_registered_body\|/cloud_effected\|/path)$` |
   | Setup scripts (space-separated) | `~/raytheon-2027-drone/install/setup.bash` | `~/LIDARSLAM/autostart/ros_env.sh ~/tar_ws/install/setup.bash` |

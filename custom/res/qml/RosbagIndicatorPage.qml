@@ -80,6 +80,18 @@ ToolIndicatorPage {
                         }
                     }
 
+                    RowLayout {
+                        QGCLabel { text: qsTr("Bag name") }
+                        QGCTextField {
+                            Layout.fillWidth:       true
+                            Layout.preferredWidth:  _fieldWidth
+                            text:                   _r.bagName
+                            placeholderText:        qsTr("automatic: %1_date_time").arg(_r.bagPrefix)
+                            enabled:                !_r.recording
+                            onTextChanged:          _r.bagName = text
+                        }
+                    }
+
                     QGCLabel {
                         Layout.fillWidth:       true
                         Layout.preferredWidth:  _fieldWidth

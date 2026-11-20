@@ -39,6 +39,8 @@ class TarRosbagRecorder : public QObject
     Q_PROPERTY(QString setupScript  READ setupScript    WRITE setSetupScript    NOTIFY settingsChanged)
     Q_PROPERTY(QString extraArgs    READ extraArgs      WRITE setExtraArgs      NOTIFY settingsChanged)
     Q_PROPERTY(QString downloadFolder READ downloadFolder WRITE setDownloadFolder NOTIFY settingsChanged)
+    /// Name for the next bag only ("" = <prefix>_<date>_<time>); cleared once that recording starts.
+    Q_PROPERTY(QString bagName      READ bagName        WRITE setBagName        NOTIFY bagNameChanged)
 
     // Download of the last bag to this computer (scp)
     Q_PROPERTY(bool     downloading     READ downloading    NOTIFY downloadChanged)
@@ -97,6 +99,10 @@ public:
     void setSetupScript(const QString &value);
     QString extraArgs() const { return _extraArgs; }
     void setExtraArgs(const QString &value);
+    QString bagName() const { return _bagName; }
+    void setBagName(const QString &value);
+    /// Bag name made safe for a folder name (letters, digits, . _ -), or "".
+    static QString sanitizeBagName(const QString &value);
     QString downloadFolder() const { return _downloadFolder; }
     void setDownloadFolder(const QString &value);
 
@@ -122,6 +128,7 @@ signals:
     void busyChanged();
     void logChanged();
     void downloadChanged();
+    void bagNameChanged();
 
 private:
     struct Job {
@@ -175,6 +182,8 @@ private:
     QString _setupScript;
     QString _extraArgs;
     QString _downloadFolder;
+    QString _bagName;
+    QString _startingName;   ///< sanitized name sent with the Start in progress
 
     QProcess *_download = nullptr;
     QTimer _downloadTimer;

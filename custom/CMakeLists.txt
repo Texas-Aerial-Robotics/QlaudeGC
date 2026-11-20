@@ -34,8 +34,12 @@ set(CUSTOM_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Assistant/TarMcpObjects.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Assistant/TarMcpServer.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Assistant/TarMcpServer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Field/TarFieldNetwork.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Field/TarFieldNetwork.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Rosbag/TarRosbag.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Rosbag/TarRosbag.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Rosbag/TarRosbagRecorder.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Rosbag/TarRosbagRecorder.h
     ${TAR_ROUTER_SOURCES}
     CACHE INTERNAL "" FORCE
 )
@@ -44,6 +48,7 @@ set(CUSTOM_INCLUDE_DIRECTORIES
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Router
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Assistant
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Field
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Rosbag
     CACHE INTERNAL "" FORCE
 )

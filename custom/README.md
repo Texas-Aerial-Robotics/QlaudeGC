@@ -69,39 +69,63 @@ Output: `build\RelWithDebInfo\QlaudeGC.exe` (see the build log for the exact pat
 The custom code only touches public QGC APIs (`QGCCorePlugin`, `LinkManager`, `UDPConfiguration`), so
 moving to a newer QGC tag is: fetch the tag, rebase the `tar-custom` branch, rebuild.
 
+## TAR vehicles and network
+
+Two vehicles are hard-coded, each with a Tailscale and a field-router address:
+
+| Vehicle | Tailscale (`-tail`) | Field router `tar-ravc` (`-router`) | ROS domain |
+|---|---|---|---|
+| UAV (drone Jetson) | `100.66.89.102` | `192.168.0.100` | 1 |
+| UGV (rover Jetson) | `100.81.151.45` | `192.168.0.200` | 2 |
+
+- **Comm links.** Four UDP comm links, `uav-tail`, `uav-router`, `ugv-tail` and `ugv-router`, to each vehicle's
+  mavlink-router on port 14550 (local ports 14561/14562/14571/14572). They are created at startup if missing, and
+  put back if their address or port was edited.
+- **Network detection.** Every 10 s QGC reads the PC's Wi-Fi name (`netsh wlan` on Windows, `nmcli` on Linux):
+  `tar-ravc` means the field router; `utexas`, `utexas-iot` and anything else mean Tailscale. When it changes, the
+  matching pair of links is connected and the other pair disconnected; manual connects/disconnects are left alone
+  until the network changes again. The bag recorders use the same address.
+- **Code.** `src/Field/TarFieldNetwork.{h,cc}`.
+
 ## ROS bag recording
 
-The **Bag** toolbar indicator starts and stops `ros2 bag record` on the companion computer (the drone's Jetson).
+The **Bag** toolbar indicator starts and stops `ros2 bag record` on the UAV and the UGV, independently: either
+vehicle can start or stop while the other records, and **Start Both / Stop Both** do both at once.
 
 - **How it works.**
   - QGC runs `ssh` (Windows OpenSSH, key auth, `BatchMode`, so it never prompts for a password) and pipes `res/rosbag/rosbag_ctl.sh` to `bash -s` with the settings prepended as shell variables. Nothing needs to be installed on the drone.
   - The recorder runs detached (`setsid nohup`), so it keeps going if the link or QGC drops. Its state is kept on the drone in `~/.qgc_rosbag.pid` and `~/.qgc_rosbag.dir`, so a restarted QGC sees a recording that is already running.
   - **Stop** sends SIGINT to the recorder and waits up to 30 s, so rosbag2 closes the bag and writes `metadata.yaml`.
   - If the recorder dies on its own, the next status check reports it with the tail of `<bag>.log`.
-- **Indicator.**
-  - Red blinking dot and elapsed time while recording.
-  - Outlined dot and "Bag" when idle.
-  - Grey when the companion can't be reached.
-- **Drop-down page.** Click the indicator for Start/Stop, the bag path, its size and the free space on the companion.
-- **Polling.** QGC checks status every 5 s while recording and every 30 s while idle, and doesn't poll at all while the companion is unreachable. Opening the page refreshes.
-- **Settings** (expanded page, saved):
+- **Indicator.** Per vehicle: a red blinking dot and elapsed time while recording, an outlined dot when idle,
+  grey when its companion can't be reached (e.g. `UAV ● 03:12  UGV ○`).
+- **Drop-down page.** The network in use, then per vehicle: Start/Stop, Refresh, the bag path, its size and the
+  free space on the companion; and Start Both / Stop Both.
+- **Polling.** Per vehicle, every 5 s while recording and every 30 s while idle; no polling while unreachable.
+  Opening the page refreshes both.
+- **Settings** (expanded page, saved per vehicle under `TarRosbag/<uav|ugv>`; the address is not a setting):
 
-  | Setting | Default |
-  |---|---|
-  | Companion | `tar@100.66.89.102` |
-  | ssh key | blank, which uses `~/.ssh/id_ed25519` and the other default keys |
-  | `ROS_DOMAIN_ID` | 1 |
-  | Bag folder | `~/bags` |
-  | Bag name prefix | `qgc`, giving `qgc_YYYYmmdd_HHMMSS` |
-  | Exclude regex | `^(/camera/image_raw\|/path\|/aft_mapped_to_init)$` |
-  | Extra setup.bash | `~/raytheon-2027-drone/install/setup.bash` (the drone's workspace: px4_msgs, dice_msgs, ...) |
-  | Extra `ros2 bag record` arguments | blank |
+  | Setting | UAV default | UGV default |
+  |---|---|---|
+  | ssh key | blank (default keys) | blank (default keys) |
+  | `ROS_DOMAIN_ID` | 1 | 2 |
+  | Bag folder | `~/bags` | `~/bags` |
+  | Bag name prefix | `uav` | `ugv` |
+  | Exclude regex | `^(/camera/image_raw\|/path\|/aft_mapped_to_init)$` | `^(/Laser_map\|/cloud_registered\|/cloud_registered_body\|/cloud_effected\|/path)$` |
+  | Setup scripts (space-separated) | `~/raytheon-2027-drone/install/setup.bash` | `~/LIDARSLAM/autostart/ros_env.sh ~/tar_ws/install/setup.bash` |
+  | Extra `ros2 bag record` arguments | blank | blank |
 
-  - The exclude regex leaves out the raw camera, which overruns the Orin Nano eMMC, and Point-LIO's ~16 kHz odometry.
-  - `/opt/ros/<distro>` is found automatically (jazzy, humble, ...). The exclude flag is picked per distro: `--exclude` on Humble, `--exclude-regex` on Jazzy.
-- **Claude.** The sidebar sees the recorder state in its context and has `rosbag_status`, `rosbag_start` and `rosbag_stop`. Start and stop show an approval card first.
+  - UAV: the raw camera overruns the Orin Nano eMMC; Point-LIO's `/path` grows and `/aft_mapped_to_init` is high-rate.
+  - UGV: FAST-LIO's registered clouds and map are large and `/path` grows. Its setup scripts provide the Livox
+    message type (`livox_ros_driver2/CustomMsg`), the rover's Fast DDS profile and `tar_ws` messages.
+  - `/opt/ros/<distro>` is found automatically. The exclude flag is picked per distro: `--exclude` on Humble,
+    `--exclude-regex` on Jazzy.
+- **Claude.** The sidebar sees both recorders and the network in its context. `rosbag_status`, `rosbag_start` and
+  `rosbag_stop` take `vehicle` = `uav`, `ugv` or `both`; start and stop show one approval card for the vehicles
+  that need it and leave the others alone.
 - **Code.**
-  - `src/Rosbag/TarRosbag.{h,cc}`: the backend.
+  - `src/Rosbag/TarRosbag.{h,cc}`: the two-vehicle manager (`tarRosbag` in QML).
+  - `src/Rosbag/TarRosbagRecorder.{h,cc}`: one vehicle's recorder (ssh jobs, state, settings).
   - `res/rosbag/rosbag_ctl.sh`: runs on the companion.
   - `res/qml/RosbagIndicator.qml` and `RosbagIndicatorPage.qml`: the toolbar indicator and its page.
 

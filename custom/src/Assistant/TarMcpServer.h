@@ -119,7 +119,9 @@ private:
     void _toolCommLinkAction(QTcpSocket *socket, const QJsonValue &id, const QJsonObject &args);
 
     // ROS bag recording on the companion
-    void _toolRosbagStatus(QTcpSocket *socket, const QJsonValue &id);
+    void _toolRosbagStatus(QTcpSocket *socket, const QJsonValue &id, const QJsonObject &args);
+    /// Recorders named by args.vehicle ("uav", "ugv", "both"; empty = defaultAll ? both : none).
+    QList<TarRosbagRecorder *> _rosbagTargets(const QJsonObject &args, bool defaultAll, QString &error) const;
     void _toolRosbagStartStop(QTcpSocket *socket, const QJsonValue &id, const QJsonObject &args, bool start);
 
     void _requestApproval(const PendingApproval &pending, const QString &title, const QString &reason, QStringList warnings);

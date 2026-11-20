@@ -10,6 +10,7 @@
 
 #include "QGCLoggingCategory.h"
 #include "TarAssistant.h"
+#include "TarFieldNetwork.h"
 #include "TarRosbag.h"
 #include "TarRouter.h"
 
@@ -20,7 +21,8 @@ Q_APPLICATION_STATIC(TarPlugin, _tarPluginInstance);
 TarPlugin::TarPlugin(QObject *parent)
     : QGCCorePlugin(parent)
     , _router(new TarRouter(this))
-    , _rosbag(new TarRosbag(this))
+    , _network(new TarFieldNetwork(this))
+    , _rosbag(new TarRosbag(_network, this))
     , _assistant(new TarAssistant(_router, this))
 {
     _assistant->setRosbag(_rosbag);
@@ -37,6 +39,8 @@ void TarPlugin::init()
     QGCCorePlugin::init();
     // Defer until the event loop runs so LinkManager has finished its own startup.
     QTimer::singleShot(0, _router, &TarRouter::init);
+    // Same for the hard-coded UAV/UGV comm links: create them after the saved links are loaded.
+    QTimer::singleShot(0, _network, &TarFieldNetwork::init);
 }
 
 void TarPlugin::cleanup()

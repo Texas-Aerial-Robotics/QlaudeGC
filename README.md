@@ -1,9 +1,11 @@
 # QlaudeGC
 
-**QlaudeGC** is a custom build of [QGroundControl](https://github.com/mavlink/qgroundcontrol). It adds three things to QGC:
+**QlaudeGC** is a custom build of [QGroundControl](https://github.com/mavlink/qgroundcontrol). This is the
+Texas Aerial Robotics fork, with the team's UAV and UGV built in. It adds to QGC:
 
 - a **built-in MAVLink router**, so other programs can share QGC's vehicle connection;
-- **ROS bag recording** on the drone's companion computer, started and stopped from the toolbar;
+- **TAR vehicle links**: hard-coded comm links to the UAV and UGV, over Tailscale or the field router depending on the Wi-Fi;
+- **ROS bag recording** on the UAV and UGV companion computers, each on its own or both together, from the toolbar;
 - a **Claude chat sidebar** that can see the live vehicle state and, after you approve each change, adjust parameters, app settings and comm links.
 
 All of the custom code is in [`custom/`](custom/) and uses QGC's standard custom-build plugin mechanism (`QGCCorePlugin`). The rest of the tree is upstream QGC, unchanged, so updating to a newer QGC is a normal merge from `mavlink/qgroundcontrol`.
@@ -31,14 +33,19 @@ Detailed documentation: [`custom/README.md`](custom/README.md).
 - **Toolbar indicator.** It shows traffic, the number of active endpoints and config errors at a glance. Click it for per-endpoint rx/tx rates, the system ids heard on each endpoint, CRC errors, the enable switch and the log.
 - **`tar_router_cli`.** The same router engine as a standalone console program. `--check file.conf` validates a config.
 
+### TAR vehicle links
+
+- **Hard-coded comm links** `uav-tail` (100.66.89.102), `uav-router` (192.168.0.100), `ugv-tail` (100.81.151.45) and `ugv-router` (192.168.0.200), UDP to each vehicle's mavlink-router on port 14550. Created at startup if missing.
+- **Picked by the Wi-Fi.** On the field router `tar-ravc` the `-router` pair is connected; on `utexas`, `utexas-iot` or anything else the `-tail` (Tailscale) pair. Switches automatically when the network changes.
+
 ### ROS bag recording
 
-- **One click from the toolbar.** The **Bag** indicator starts and stops `ros2 bag record` on the companion computer (e.g. the Jetson) over ssh with your existing key. Nothing needs to be installed on the drone.
+- **Two vehicles, independently.** The **Bag** indicator starts and stops `ros2 bag record` on the UAV (drone Jetson) and the UGV (rover Jetson) over ssh with your existing key: either one on its own, one while the other is recording, or **Start Both / Stop Both**. Nothing needs to be installed on the vehicles.
 - **Safe stop.** Stop sends SIGINT and waits, so the bag is closed cleanly with `metadata.yaml`.
 - **Survives drops.** The recorder runs detached, so losing the link or closing QGC doesn't end it. A restarted QGC picks up a recording that is already running.
-- **Live status.** A red blinking dot and the elapsed time while recording; the drop-down shows the bag path, size and free space on the companion. A recorder that dies on its own is reported with its last log lines.
-- **Sensible defaults, all editable.** Records all topics except the raw camera and Point-LIO's high-rate odometry, on `ROS_DOMAIN_ID` 1, into `~/bags`. Works on Humble and Jazzy.
-- **Claude can use it too.** The sidebar has `rosbag_status`, `rosbag_start` and `rosbag_stop`; start and stop need your approval.
+- **Live status.** Per vehicle, a red blinking dot and the elapsed time while recording; the drop-down shows each bag's path, size and the free space on that companion. A recorder that dies on its own is reported with its last log lines.
+- **Sensible defaults, all editable per vehicle.** UAV: domain 1, everything except the raw camera and Point-LIO's high-rate outputs. UGV: domain 2, everything except FAST-LIO's dense clouds and map. Both into `~/bags`. Works on Humble and Jazzy.
+- **Claude can use it too.** The sidebar has `rosbag_status`, `rosbag_start` and `rosbag_stop` with `vehicle` = `uav`, `ugv` or `both`; start and stop need your approval.
 
 ### Claude chat sidebar
 

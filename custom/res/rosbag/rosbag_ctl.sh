@@ -5,7 +5,8 @@
 #   QGC_DIR      folder for bags (a leading ~/ means $HOME)
 #   QGC_PREFIX   bag name prefix
 #   QGC_EXCLUDE  regex of topics to leave out ("" = record everything)
-#   QGC_SETUP    extra setup.bash to source after /opt/ros (e.g. the workspace with px4_msgs), may be ""
+#   QGC_SETUP    extra setup scripts to source after /opt/ros, space-separated (e.g. the workspace with
+#                px4_msgs; the rover needs its ros_env.sh and tar_ws), may be ""
 #   QGC_EXTRA    extra `ros2 bag record` arguments, split on spaces
 # Output is KEY=VALUE lines, parsed by TarRosbag. State lives in ~/.qgc_rosbag.{pid,dir} so a restarted
 # QGC (or a second one) sees a recording that is already running.
@@ -73,10 +74,12 @@ do_start() {
             break
         fi
     done
-    if [ -n "$QGC_SETUP" ]; then
-        case "$QGC_SETUP" in "~/"*) QGC_SETUP="$HOME/${QGC_SETUP#\~/}" ;; esac
-        [ -f "$QGC_SETUP" ] && . "$QGC_SETUP"
-    fi
+    local s
+    for s in $QGC_SETUP; do
+        case "$s" in "~/"*) s="$HOME/${s#\~/}" ;; esac
+        # shellcheck disable=SC1090
+        [ -f "$s" ] && . "$s"
+    done
     if ! command -v ros2 >/dev/null 2>&1; then
         echo "ERROR=ros2 not found (no /opt/ros/<distro>/setup.bash)"
         return

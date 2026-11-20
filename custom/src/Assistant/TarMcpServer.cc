@@ -1,5 +1,7 @@
 #include "TarMcpServer.h"
 
+#include <memory>
+
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QRandomGenerator>
@@ -420,23 +422,27 @@ QJsonArray TarMcpServer::_toolDefinitions() const
         },
         QJsonObject{
             {QStringLiteral("name"), QStringLiteral("rosbag_status")},
-            {QStringLiteral("description"), QStringLiteral("Check ROS bag recording on the companion computer (the drone's Jetson, over ssh): whether a bag is recording, its path, size and duration, the last bag, free disk space, and the recording settings (excluded topics, folder, ROS_DOMAIN_ID).")},
-            {QStringLiteral("inputSchema"), schema({})},
+            {QStringLiteral("description"), QStringLiteral("Check ROS bag recording on the TAR vehicles' companion computers (UAV = drone Jetson, UGV = rover Jetson, over ssh): whether each is recording, bag path, size and duration, the last bag, free disk space, the recording settings, and which network/addresses are in use.")},
+            {QStringLiteral("inputSchema"), schema({
+                {QStringLiteral("vehicle"), prop(QStringLiteral("string"), QStringLiteral("uav, ugv or both (default both)"))},
+            })},
             {QStringLiteral("annotations"), QJsonObject{{QStringLiteral("readOnlyHint"), true}}},
         },
         QJsonObject{
             {QStringLiteral("name"), QStringLiteral("rosbag_start")},
-            {QStringLiteral("description"), QStringLiteral("Start ros2 bag record on the companion computer with the settings from the Bag toolbar indicator (all topics minus the exclude regex). Needs the user's approval; the call waits for the decision and for the recorder to start, and returns the bag path.")},
+            {QStringLiteral("description"), QStringLiteral("Start ros2 bag record on the UAV, the UGV or both, with each vehicle's settings from the Bag toolbar indicator (all topics minus its exclude regex). A vehicle that is already recording is left alone. Needs the user's approval; the call waits for the decision and for the recorders to start, and returns the bag paths.")},
             {QStringLiteral("inputSchema"), schema({
+                {QStringLiteral("vehicle"), prop(QStringLiteral("string"), QStringLiteral("uav, ugv or both"))},
                 {QStringLiteral("reason"), prop(QStringLiteral("string"), QStringLiteral("One sentence shown to the user"))},
-            })},
+            }, {QStringLiteral("vehicle")})},
         },
         QJsonObject{
             {QStringLiteral("name"), QStringLiteral("rosbag_stop")},
-            {QStringLiteral("description"), QStringLiteral("Stop the running ROS bag recording on the companion computer (SIGINT, so the bag is closed cleanly with metadata.yaml). Needs the user's approval; returns the saved bag path and size.")},
+            {QStringLiteral("description"), QStringLiteral("Stop ROS bag recording on the UAV, the UGV or both (SIGINT, so each bag is closed cleanly with metadata.yaml). A vehicle that is not recording is left alone. Needs the user's approval; returns the saved bag paths and sizes.")},
             {QStringLiteral("inputSchema"), schema({
+                {QStringLiteral("vehicle"), prop(QStringLiteral("string"), QStringLiteral("uav, ugv or both"))},
                 {QStringLiteral("reason"), prop(QStringLiteral("string"), QStringLiteral("One sentence shown to the user"))},
-            })},
+            }, {QStringLiteral("vehicle")})},
         },
         QJsonObject{
             {QStringLiteral("name"), QStringLiteral("qgc_inspect")},
@@ -498,7 +504,7 @@ void TarMcpServer::_callTool(QTcpSocket *socket, const QJsonValue &id, const QSt
     } else if (name == QLatin1String("comm_link_action")) {
         _toolCommLinkAction(socket, id, args);
     } else if (name == QLatin1String("rosbag_status")) {
-        _toolRosbagStatus(socket, id);
+        _toolRosbagStatus(socket, id, args);
     } else if (name == QLatin1String("rosbag_start")) {
         _toolRosbagStartStop(socket, id, args, true);
     } else if (name == QLatin1String("rosbag_stop")) {
@@ -757,58 +763,113 @@ void TarMcpServer::_requestApproval(const PendingApproval &pending, const QStrin
 // ROS bag recording on the companion computer
 // ---------------------------------------------------------------------------------------------------------
 
-void TarMcpServer::_toolRosbagStatus(QTcpSocket *socket, const QJsonValue &id)
+QList<TarRosbagRecorder *> TarMcpServer::_rosbagTargets(const QJsonObject &args, bool defaultAll, QString &error) const
 {
+    QList<TarRosbagRecorder *> out;
     if (!_rosbag) {
-        _sendToolResult(socket, id, QStringLiteral("ROS bag recording is not available in this build."), true);
+        error = QStringLiteral("ROS bag recording is not available in this build.");
+        return out;
+    }
+    const QString v = args.value(QStringLiteral("vehicle")).toString().trimmed().toLower();
+    if (v == QLatin1String("both") || (v.isEmpty() && defaultAll)) {
+        return _rosbag->recorders();
+    }
+    if (TarRosbagRecorder *r = _rosbag->recorder(v)) {
+        out << r;
+    } else {
+        error = QStringLiteral("vehicle must be uav, ugv or both.");
+    }
+    return out;
+}
+
+void TarMcpServer::_toolRosbagStatus(QTcpSocket *socket, const QJsonValue &id, const QJsonObject &args)
+{
+    QString error;
+    const QList<TarRosbagRecorder *> targets = _rosbagTargets(args, true, error);
+    if (targets.isEmpty()) {
+        _sendToolResult(socket, id, error, true);
         return;
     }
+    // Ask every vehicle, answer once all have replied.
     QPointer<TarMcpServer> self(this);
     const QPointer<QTcpSocket> guard(socket);
-    _rosbag->run(TarRosbag::Command::Status, [self, guard, id](bool ok, const QString &message) {
-        if (self) {
-            self->_sendToolResult(guard, id, message, !ok);
-        }
-    });
+    auto results = std::make_shared<QStringList>();
+    auto remaining = std::make_shared<int>(static_cast<int>(targets.size()));
+    const QString network = _rosbag->network() ? QStringLiteral("Ground station network: %1.").arg(static_cast<TarFieldNetwork *>(_rosbag->network())->modeText()) : QString();
+    for (TarRosbagRecorder *r : targets) {
+        r->run(TarRosbagRecorder::Command::Status, [self, guard, id, results, remaining, network](bool, const QString &message) {
+            *results << message;
+            if (--(*remaining) == 0 && self) {
+                self->_sendToolResult(guard, id, (network.isEmpty() ? QString() : network + QLatin1Char('\n')) + results->join(QLatin1Char('\n')));
+            }
+        });
+    }
 }
 
 void TarMcpServer::_toolRosbagStartStop(QTcpSocket *socket, const QJsonValue &id, const QJsonObject &args, bool start)
 {
-    if (!_rosbag) {
-        _sendToolResult(socket, id, QStringLiteral("ROS bag recording is not available in this build."), true);
+    QString error;
+    const QList<TarRosbagRecorder *> targets = _rosbagTargets(args, false, error);
+    if (targets.isEmpty()) {
+        _sendToolResult(socket, id, error, true);
         return;
     }
-    if (_rosbag->known() && _rosbag->recording() == start) {
-        _sendToolResult(socket, id, (start ? QStringLiteral("Already recording. ") : QStringLiteral("Not recording. ")) + _rosbag->statusText());
+    // Leave alone a vehicle that is already in the requested state.
+    QList<QPointer<TarRosbagRecorder>> todo;
+    QStringList unchanged;
+    for (TarRosbagRecorder *r : targets) {
+        if (r->known() && r->recording() == start) {
+            unchanged << QStringLiteral("%1: %2").arg(r->label(), start ? QStringLiteral("already recording") : QStringLiteral("not recording"));
+        } else {
+            todo << r;
+        }
+    }
+    if (todo.isEmpty()) {
+        _sendToolResult(socket, id, QStringLiteral("Nothing to do. ") + unchanged.join(QStringLiteral("; ")) + QLatin1Char('\n') + _rosbag->statusText());
         return;
     }
 
     PendingApproval pending;
     pending.socket = socket;
     pending.rpcId = id;
-    if (start) {
-        pending.lines << QStringLiteral("ros2 bag record on %1").arg(_rosbag->host())
-                      << QStringLiteral("Folder %1, ROS_DOMAIN_ID %2").arg(_rosbag->bagFolder(), _rosbag->domainId())
-                      << QStringLiteral("Excluding: %1").arg(_rosbag->excludeRegex().isEmpty() ? QStringLiteral("nothing (all topics)") : _rosbag->excludeRegex());
-    } else {
-        pending.lines << QStringLiteral("ros2 bag record on %1").arg(_rosbag->host());
-        if (!_rosbag->bagPath().isEmpty()) {
-            pending.lines << _rosbag->bagPath();
-        }
-    }
-    const QPointer<TarRosbag> rosbag(_rosbag);
-    pending.applyAsync = [rosbag, start](std::function<void(bool, const QString &)> done) {
-        if (!rosbag) {
-            done(false, QStringLiteral("ROS bag recorder is gone."));
-            return;
-        }
-        rosbag->run(start ? TarRosbag::Command::Start : TarRosbag::Command::Stop, done);
-    };
     QStringList warnings;
-    if (!_rosbag->known()) {
-        warnings << QStringLiteral("The companion has not answered yet; this may fail.");
+    QStringList labels;
+    for (const QPointer<TarRosbagRecorder> &r : todo) {
+        labels << r->label();
+        if (start) {
+            pending.lines << QStringLiteral("%1: ros2 bag record on %2, folder %3, ROS_DOMAIN_ID %4").arg(r->label(), r->host(), r->bagFolder(), r->domainId())
+                          << QStringLiteral("%1: excluding %2").arg(r->label(), r->excludeRegex().isEmpty() ? QStringLiteral("nothing (all topics)") : r->excludeRegex());
+        } else {
+            pending.lines << QStringLiteral("%1: stop ros2 bag record on %2%3").arg(r->label(), r->host(),
+                                                                                    r->bagPath().isEmpty() ? QString() : QStringLiteral(" (%1)").arg(r->bagPath()));
+        }
+        if (!r->known()) {
+            warnings << QStringLiteral("%1 has not answered yet; this may fail.").arg(r->label());
+        }
     }
-    _requestApproval(pending, start ? QStringLiteral("Start ROS bag recording") : QStringLiteral("Stop ROS bag recording"),
+    for (const QString &u : unchanged) {
+        pending.lines << QStringLiteral("(%1, left alone)").arg(u);
+    }
+    pending.applyAsync = [todo, start](std::function<void(bool, const QString &)> done) {
+        auto results = std::make_shared<QStringList>();
+        auto remaining = std::make_shared<int>(static_cast<int>(todo.size()));
+        auto allOk = std::make_shared<bool>(true);
+        for (const QPointer<TarRosbagRecorder> &r : todo) {
+            auto finish = [results, remaining, allOk, done](bool ok, const QString &message) {
+                *results << message;
+                *allOk = *allOk && ok;
+                if (--(*remaining) == 0) {
+                    done(*allOk, results->join(QLatin1Char('\n')));
+                }
+            };
+            if (!r) {
+                finish(false, QStringLiteral("Recorder is gone."));
+                continue;
+            }
+            r->run(start ? TarRosbagRecorder::Command::Start : TarRosbagRecorder::Command::Stop, finish);
+        }
+    };
+    _requestApproval(pending, QStringLiteral("%1 ROS bag recording: %2").arg(start ? QStringLiteral("Start") : QStringLiteral("Stop"), labels.join(QStringLiteral(" + "))),
                      args.value(QStringLiteral("reason")).toString().trimmed(), warnings);
 }
 

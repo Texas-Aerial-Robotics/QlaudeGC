@@ -123,15 +123,39 @@ void RouterCore::_addEndpoint(RouterEndpoint *endpoint)
     endpoint->open();
 }
 
+bool RouterCore::_isQgcLink(const RouterEndpoint *endpoint) const
+{
+    for (const QgcLinkEndpoint *link : _qgcLinks) {
+        if (static_cast<const RouterEndpoint *>(link) == endpoint) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void RouterCore::_route(RouterEndpoint *source, const MavFrame &frame)
 {
+    // QGC already talks to every vehicle over that vehicle's own link; the bridge only exists so router clients
+    // (MAVSDK, TCP, ...) can reach the vehicles. Never relay one QGC link's traffic into another: with several
+    // vehicles connected, each would receive the others' full telemetry stream (e.g. ~350 msg/s of UAV
+    // telemetry sent over Tailscale to the UGV).
+    const bool fromQgcLink = _isQgcLink(source);
+    const auto excluded = [this, source, fromQgcLink](const RouterEndpoint *endpoint) {
+        return (endpoint == source) || (fromQgcLink && _isQgcLink(endpoint));
+    };
+
     if (frame.targetSystem != 0) {
         bool anyKnowsTarget = false;
         for (RouterEndpoint *endpoint : std::as_const(_endpoints)) {
-            if ((endpoint == source) || !endpoint->hasSeenSystem(frame.targetSystem)) {
+            if (!endpoint->hasSeenSystem(frame.targetSystem)) {
                 continue;
             }
-            anyKnowsTarget = true;
+            // A target that is only reachable through another QGC link counts as known (so the frame is not
+            // broadcast instead), but is not relayed there.
+            anyKnowsTarget = anyKnowsTarget || (endpoint != source);
+            if (excluded(endpoint)) {
+                continue;
+            }
             // A specific component is only enforced when this endpoint has actually seen that component;
             // otherwise components behind a companion computer would be unreachable.
             if ((frame.targetComponent != 0) && !endpoint->hasSeenComponent(frame.targetSystem, frame.targetComponent)) {
@@ -154,7 +178,7 @@ void RouterCore::_route(RouterEndpoint *source, const MavFrame &frame)
     }
 
     for (RouterEndpoint *endpoint : std::as_const(_endpoints)) {
-        if (endpoint != source) {
+        if (!excluded(endpoint)) {
             (void) endpoint->send(frame);
         }
     }

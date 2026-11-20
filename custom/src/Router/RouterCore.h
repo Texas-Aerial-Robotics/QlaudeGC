@@ -49,6 +49,8 @@ signals:
 private:
     void _addEndpoint(RouterEndpoint *endpoint);
     void _route(RouterEndpoint *source, const MavFrame &frame);
+    /// True when the endpoint is one of QGC's own links bridged into the router.
+    bool _isQgcLink(const RouterEndpoint *endpoint) const;
     void _acceptTcpClients();
     void _removeTcpClient(TcpEndpoint *endpoint);
     QVariantList _snapshot();
